@@ -45,8 +45,12 @@ then define a search function, ::
         return 0
 """
 
-import random
+import hashlib
 import json
+import os
+import random
+import shutil
+from tempfile import NamedTemporaryFile
 
 import khmer
 from khmer import khmer_args
@@ -70,7 +74,7 @@ class Node(object):
         self.factory = factory
         self.graph = factory.create_nodegraph()
         self.children = 0
-        
+
         self.subnodes = []
 
     def add_node(self, node):
@@ -89,7 +93,7 @@ class Node(object):
                 subn = self.subnodes[1]
 
             ## push child down one level in the tree ##
-                
+
             # remove from immediate:
             self.subnodes.remove(subn)
 
@@ -140,26 +144,39 @@ def print_sbt(node):
         print_sbt(node.subnodes[0])
         print_sbt(node.subnodes[1])
 
-def node_name(node, tag):
-    if type(node) is Leaf:
-        name = node.metadata
-    else:
-        name = str(id(node))
-    return '.'.join([tag, name, 'sbt'])
+
+def sha256sum(filename):
+    hash = hashlib.sha256()
+    with open(filename) as f:
+        for chunk in iter(lambda: f.read(4096), ""):
+            hash.update(chunk)
+    return hash.hexdigest()
+
 
 def save_node(node, structure, tag):
 
-    name = node_name(node, tag)
-    node.graph.save(name)
-    structure['name'] = name
-    structure['children'] = node.children
+    if not os.path.exists('.sbt'):
+        os.makedirs(".sbt")
 
     if type(node) is Leaf:
-
         structure['metadata'] = node.metadata
-
+        fname = sha256sum(node.metadata)
+        node.graph.save(os.path.join('.sbt', fname))
     else:
-        
+        f = NamedTemporaryFile(delete=False)
+        node.graph.save(f.name)
+
+        # sha256 of the file
+        fname = sha256sum(f.name)
+        f.close()
+
+        # move tmp file to new place
+        shutil.move(f.ame, os.path.join(".sbt", fname))
+
+    structure['bf'] = os.path.join('.sbt', fname)
+    structure['children'] = node.children
+
+    if type(node) is not Leaf:
         structure['left'] = {}
         save_node(node.subnodes[0], structure['left'], tag)
         structure['right'] = {}
@@ -182,7 +199,7 @@ def load_sbt(sbt_fn):
     with open(sbt_fn) as fp:
        sbt_dict = json.load(fp)
 
-    ksize, tablesize, ntables, _, _, _ = khmer.extract_nodegraph_info(sbt_dict['root']['name'])
+    ksize, tablesize, ntables, _, _, _ = khmer.extract_nodegraph_info(sbt_dict['root']['bf'])
     factory = GraphFactory(ksize, tablesize, ntables)
 
     tree = load_node(sbt_dict['root'], factory)
@@ -191,11 +208,11 @@ def load_sbt(sbt_fn):
 
 def load_node(node_dict, factory):
 
-    graph = khmer.load_nodegraph(node_dict['name'])
+    graph = khmer.load_nodegraph(node_dict['bf'])
 
     if 'metadata' in node_dict: # must be a leaf
         return Leaf(node_dict['metadata'], graph)
-        
+
     else:
         node = Node(factory)
         node.graph = graph
@@ -216,7 +233,7 @@ def test_simple():
     leaf1.graph.count('AAAAA')
     leaf1.graph.count('AAAAT')
     leaf1.graph.count('AAAAC')
-    
+
     leaf2 = Leaf("b", factory.create_nodegraph())
     leaf2.graph.count('AAAAA')
     leaf2.graph.count('AAAAT')
@@ -236,7 +253,7 @@ def test_simple():
     leaf5.graph.count('AAAAA')
     leaf5.graph.count('AAAAT')
     leaf5.graph.count('GAAAA')
-    
+
     root.add_node(leaf1)
     root.add_node(leaf2)
     root.add_node(leaf3)
@@ -276,7 +293,7 @@ def test_longer_search():
     leaf1.graph.count('AAAAA')
     leaf1.graph.count('AAAAT')
     leaf1.graph.count('AAAAC')
-    
+
     leaf2 = Leaf("b", factory.create_nodegraph())
     leaf2.graph.count('AAAAA')
     leaf2.graph.count('AAAAT')
@@ -296,7 +313,7 @@ def test_longer_search():
     leaf5.graph.count('AAAAA')
     leaf5.graph.count('AAAAT')
     leaf5.graph.count('GAAAA')
-    
+
     root.add_node(leaf1)
     root.add_node(leaf2)
     root.add_node(leaf3)
@@ -315,7 +332,7 @@ def test_longer_search():
 
     try1 = [ x.metadata for x in root.find(search_transcript, "AAAAT", 1.0) ]
     assert set(try1) == set([ 'a', 'b', 'c', 'e' ]), try1 # no 'd'
-    
+
     try2 = [ x.metadata for x in root.find(search_transcript, "GAAAAAT", 0.6) ]
     assert set(try2) == set([ 'a', 'b', 'c', 'd', 'e' ])
 
