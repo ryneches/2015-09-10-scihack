@@ -45,8 +45,14 @@ def main():
     for sample_fn in args.samples:
         print '*** Build node for', sample_fn
         leaf = sbt.Leaf(sample_fn, factory.create_nodegraph())
-        print '--- Consuming file...'
-        leaf.graph.consume_fasta(sample_fn)
+
+        fname = os.path.join('.sbt', sbt.sha256sum(sample_fn))
+        if os.path.exists(fname):
+            print '--- Loading existing file...'
+            leaf.graph.load(fname)
+        else:
+            print '--- Consuming file...'
+            leaf.graph.consume_fasta(sample_fn)
         print '--- Adding node to SBT...'
         root.add_node(leaf)
         print '--- Done with', sample_fn
